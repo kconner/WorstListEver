@@ -1,5 +1,8 @@
 package com.willowtree.worstlistviewever;
 
+import android.content.res.AssetFileDescriptor;
+import android.media.AudioManager;
+import android.media.SoundPool;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.support.v4.app.LoaderManager;
@@ -26,8 +29,10 @@ public class MainActivity extends ActionBarActivity implements LoaderManager.Loa
     private ProgressBar mProgress;
     private int loaderId = 0;
 
-    private double hardwareFrameIntervalSeconds = 0.0;
-    private long lastTimestampNanoseconds = 0;
+    private SoundPool soundPool;
+    private int tickSoundID;
+    private double hardwareFrameIntervalSeconds;
+    private long lastTimestampNanoseconds = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,6 +46,13 @@ public class MainActivity extends ActionBarActivity implements LoaderManager.Loa
         Bundle args = getLoaderArguments(SubredditLoader.DEFAULT_SUBREDDIT);
         getSupportLoaderManager().initLoader(loaderId, args, this);
 
+        soundPool = new SoundPool(1, AudioManager.STREAM_SYSTEM, 0);
+        try {
+            AssetFileDescriptor afd = getAssets().openFd("sounds/GeigerCounterTick.wav");
+            tickSoundID = soundPool.load(afd, 1);
+        } catch (Exception exception) {
+            Log.e("Geiger Counter", exception.toString());
+        }
         hardwareFrameIntervalSeconds = 1.0 / getWindowManager().getDefaultDisplay().getRefreshRate();
         Choreographer.getInstance().postFrameCallback(this);
     }
@@ -133,23 +145,27 @@ public class MainActivity extends ActionBarActivity implements LoaderManager.Loa
         double droppedFrameIntervalSeconds = hardwareFrameIntervalSeconds * 1.5;
 
         long frameIntervalNanoseconds = timestampNanoseconds - lastTimestampNanoseconds;
-        lastTimestampNanoseconds = timestampNanoseconds;
+        if (0 < lastTimestampNanoseconds) {
+            // Compare if we have received at least two frame callbacks
+            double frameIntervalSeconds = frameIntervalNanoseconds / 1_000_000_000.0;
+            if (droppedFrameIntervalSeconds < frameIntervalSeconds) {
+                soundPool.play(tickSoundID, 1, 1, 1, 0, 1);
 
-        double frameIntervalSeconds = frameIntervalNanoseconds / 1_000_000_000.0;
-        if (droppedFrameIntervalSeconds < frameIntervalSeconds) {
-            int frameIntervalMilliseconds = (int) (frameIntervalSeconds * 1000);
-            int hardwareFrameIntervalMilliseconds = (int) (hardwareFrameIntervalSeconds * 1000);
+                int frameIntervalMilliseconds = (int) (frameIntervalSeconds * 1000);
+                int hardwareFrameIntervalMilliseconds = (int) (hardwareFrameIntervalSeconds * 1000);
 
-            StringBuilder message = new StringBuilder();
-            message.append("Dropped frame: ");
-            message.append(frameIntervalMilliseconds);
-            message.append("ms, out of ");
-            message.append(hardwareFrameIntervalMilliseconds);
-            message.append("ms");
+                StringBuilder message = new StringBuilder();
+                message.append("Dropped frame: ");
+                message.append(frameIntervalMilliseconds);
+                message.append("ms, out of ");
+                message.append(hardwareFrameIntervalMilliseconds);
+                message.append("ms");
 
-            Log.d("Geiger Counter", message.toString());
+                Log.d("Geiger Counter", message.toString());
+            }
         }
 
+        lastTimestampNanoseconds = timestampNanoseconds;
         Choreographer.getInstance().postFrameCallback(this);
     }
 
