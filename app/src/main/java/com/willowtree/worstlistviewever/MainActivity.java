@@ -4,13 +4,13 @@ import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.support.v4.app.LoaderManager;
 import android.support.v4.content.Loader;
-import android.support.v4.view.MenuCompat;
 import android.support.v4.view.MenuItemCompat;
 import android.support.v7.app.ActionBarActivity;
 import android.support.v7.widget.SearchView;
 import android.text.TextUtils;
+import android.util.Log;
+import android.view.Choreographer;
 import android.view.Menu;
-import android.view.MenuInflater;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ListView;
@@ -21,11 +21,13 @@ import com.willowtree.worstlistviewever.api.SubredditLoader;
 import com.willowtree.worstlistviewever.api.model.RedditData;
 
 
-public class MainActivity extends ActionBarActivity implements LoaderManager.LoaderCallbacks<RedditData>, AdapterView.OnItemClickListener, AdapterView.OnItemLongClickListener {
+public class MainActivity extends ActionBarActivity implements LoaderManager.LoaderCallbacks<RedditData>, AdapterView.OnItemClickListener, AdapterView.OnItemLongClickListener, Choreographer.FrameCallback {
     private ListView mListView;
     private ProgressBar mProgress;
     private int loaderId = 0;
 
+    private double hardwareFrameIntervalSeconds = 0.0;
+    private long lastTimestampNanoseconds = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -38,8 +40,18 @@ public class MainActivity extends ActionBarActivity implements LoaderManager.Loa
         mProgress = (ProgressBar) findViewById(R.id.progress);
         Bundle args = getLoaderArguments(SubredditLoader.DEFAULT_SUBREDDIT);
         getSupportLoaderManager().initLoader(loaderId, args, this);
+
+        hardwareFrameIntervalSeconds = 1.0 / getWindowManager().getDefaultDisplay().getRefreshRate();
+        Choreographer.getInstance().postFrameCallback(this);
     }
-    
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+
+        Choreographer.getInstance().removeFrameCallback(this);
+    }
+
     private Bundle getLoaderArguments(String subreddit){
         Bundle args = new Bundle();
         args.putString(SubredditLoader.SUBREDDIT, subreddit);
@@ -112,5 +124,33 @@ public class MainActivity extends ActionBarActivity implements LoaderManager.Loa
         return super.onCreateOptionsMenu(menu);
     }
 
+    // Choreographer.FrameCallback
+
+    @Override
+    public void doFrame(long timestampNanoseconds) {
+        // Ideally, frame intervals will be exactly 1x the hardware interval,
+        // and 2x means you definitely dropped one frame. So 1.5x is our point of comparison.
+        double droppedFrameIntervalSeconds = hardwareFrameIntervalSeconds * 1.5;
+
+        long frameIntervalNanoseconds = timestampNanoseconds - lastTimestampNanoseconds;
+        lastTimestampNanoseconds = timestampNanoseconds;
+
+        double frameIntervalSeconds = frameIntervalNanoseconds / 1_000_000_000.0;
+        if (droppedFrameIntervalSeconds < frameIntervalSeconds) {
+            int frameIntervalMilliseconds = (int) (frameIntervalSeconds * 1000);
+            int hardwareFrameIntervalMilliseconds = (int) (hardwareFrameIntervalSeconds * 1000);
+
+            StringBuilder message = new StringBuilder();
+            message.append("Dropped frame: ");
+            message.append(frameIntervalMilliseconds);
+            message.append("ms, out of ");
+            message.append(hardwareFrameIntervalMilliseconds);
+            message.append("ms");
+
+            Log.d("Geiger Counter", message.toString());
+        }
+
+        Choreographer.getInstance().postFrameCallback(this);
+    }
 
 }
